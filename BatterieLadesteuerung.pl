@@ -1,4 +1,4 @@
-*00:15:30 {
+*00:04:00 {
 
 	fhem ("deletereading $SELF .*");
 	
@@ -147,7 +147,7 @@
 	#############################################################################################
 
 		# Wenn die zu ladende Energie mehr ist als die Batterie aufnehmen kann, den Wert auf das Maximum begrenzen
-		if ($$RequEnergieToCharge > ($PVBatCapa - $BattUseRemaEner) ){
+		if ($RequEnergieToCharge > ($PVBatCapa - $BattUseRemaEner) ){
 			
 			$EnergieToCharge = ($PVBatCapa - $BattUseRemaEner);
 		}
@@ -224,6 +224,8 @@
 			} 
 		}
 	}
+
+	$NewBatResvSOC = round($NewBatResvSOC, 0);	
 
 	# Berechne die Laderate für die Batterie. Verwende eine fixe Dauer von 4,25 Stunden
 	my $BattChargRate = $EnergieToCharge / 4.25;
