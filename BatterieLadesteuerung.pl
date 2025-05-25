@@ -19,6 +19,7 @@
 	# Lese sonst Attribute
 	my $EndHourCheapPower = AttrVal($SELF, "EndHourCheapPower","5");
 	my $PVBatReserveSOC = AttrVal($SELF, "PVBatReserveSOC","7");
+	my $PVBatMinSOCAtEndCheap = AttrVal($SELF, "PVBatMinSOCAtEndCheap","20");
 	my $PVMaxPower = AttrVal($SELF, "PVMaxPower","9000");
 	
 	# Lese Werte
@@ -137,7 +138,7 @@
 	fhem ("setreading $SELF RequEnergieToday $RequEnergieToday");
 	fhem ("setreading $SELF RequEnergieToCharge $RequEnergieToCharge");
 
-	my $NewBatResvSOC = $PVBatReserveSOC;
+	my $PVBatNewResvSOC = $PVBatReserveSOC;
 
 	# Reicht die Energie für den Tag?
 	if ($RequEnergieToCharge > 0)
@@ -220,12 +221,16 @@
 				my $UseableBattEnergie = $BattUseRemaEner - $requiredEnergyUntilSufficient;
 				fhem ("setreading $SELF UseableBattEnergie $UseableBattEnergie");
 				#Errechne neue Batterie Entladestand
-				$NewBatResvSOC =  (100/$PVBatCapa*$UseableBattEnergie) + $PVBatReserveSOC;	
+				$PVBatNewResvSOC =  (100/$PVBatCapa*$UseableBattEnergie) + $PVBatReserveSOC;	
 			} 
 		}
 	}
 
-	$NewBatResvSOC = round($NewBatResvSOC, 0);	
+	$PVBatNewResvSOC = round($PVBatNewResvSOC, 0);	
+	# Wenn der neue reserve Batterieladestand unter dem der Mindest Reserve liegt den neuen Reverveladestand auf das Minimum setzten
+	if ($PVBatNewResvSOC < $PVBatMinSOCAtEndCheap) {
+		$PVBatNewResvSOC = $PVBatMinSOCAtEndCheap;
+	}
 
 	# Berechne die Laderate für die Batterie. Verwende eine fixe Dauer von 4,25 Stunden
 	my $BattChargRate = $EnergieToCharge / 4.25;
@@ -234,11 +239,11 @@
 	fhem ("setreading $SELF EnergieToCharge $EnergieToCharge");
 	fhem ("setreading $SELF BattChargRate $BattChargRate");
 	fhem ("setreading $SELF BattDisChargRate $BattDisChargRate");
-	fhem ("setreading $SELF NewBatResvSOC $NewBatResvSOC");
+	fhem ("setreading $SELF PVBatNewResvSOC $PVBatNewResvSOC");
 	
 	# Setze die neue Batteriereserve falls notwendig
-	if ($PVBatRese != $NewBatResvSOC){
-		fhem ("set $PVBatterieDev $PVBatReseRead $NewBatResvSOC"); 
+	if ($PVBatRese != $PVBatNewResvSOC){
+		fhem ("set $PVBatterieDev $PVBatReseRead $PVBatNewResvSOC"); 
 	}
 
 	# Wenn die Laderate größer als 0 ist, starte das Laden der Batterie
