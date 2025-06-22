@@ -1,6 +1,6 @@
 System.Sonnenschein:Zustand:.*|System.Sonnenstand:azimuth:.*|System.Sonnenstand:elevation:.* {
     
-	#V00.01.03
+	#V00.01.04
 	
 	# Auslesen der eigenen Attribute
 	# Sonnenzustands Attribute lesen
@@ -21,6 +21,8 @@ System.Sonnenschein:Zustand:.*|System.Sonnenstand:azimuth:.*|System.Sonnenstand:
 	my $vPosBeschattung  = AttrVal($SELF, "PosBeschattung","5");
 	my $vPosOffen  = AttrVal($SELF, "PosOffen","100");  
 	my $vPosZu  = AttrVal($SELF, "PosZu","0");
+	my $ActPosRoll = ReadingsVal($vRollladenDev, "pct" , "0")
+	
 	# Aussen Temperatur Attribute lesen 
 	my $vTempAussenDev   = AttrVal($SELF, "TempAussenDev","OG.Balkon.Wetterstation");
 	my $vTempAussenRead  = AttrVal($SELF, "TempAussenRead","ACTUAL_TEMPERATURE");
@@ -79,7 +81,9 @@ System.Sonnenschein:Zustand:.*|System.Sonnenstand:azimuth:.*|System.Sonnenstand:
 	   && ($vTempVorher >= $vTempVorherMin) # Prüfe Vorhersagetempertur
 	   )
 	   {
-			fhem ("set $vRollladenDev pct $vPosBeschattung");
+			if ($ActPosRoll>$vPosBeschattung){ # Nur fahren wenn der Rolladen weiter geöffnet ist
+				fhem ("set $vRollladenDev pct $vPosBeschattung");
+			}
 			fhem ("setreading $SELF Zustand 3");
 			$vFahrtenZaehler = $vFahrtenZaehler + 1;
 			fhem ("setreading $SELF FahrtenZaehler $vFahrtenZaehler");
@@ -97,7 +101,9 @@ System.Sonnenschein:Zustand:.*|System.Sonnenstand:azimuth:.*|System.Sonnenstand:
 		&& ($vSonnenStandElv < $FenstPosEinbWink)		
 		)
 	   {
-			fhem ("set $vRollladenDev pct $vPosOffen");
+			if ($ActPosRoll=$vPosBeschattung){ # Nur öffen wenn der Rolladen noch auf Position ist
+				fhem ("set $vRollladenDev pct $vPosOffen");
+			}
 			fhem ("setreading $SELF Zustand 2");			
 	   }
 	   elsif ($vZustandSonne == 0) # Direkt in den Nachtmodus
