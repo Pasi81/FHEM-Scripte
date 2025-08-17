@@ -30,16 +30,12 @@ sub RolladenAutomatik_Define {
 
 sub RolladenAutomatik_Notify {
   my ($hash, $dev) = @_;
-  my $name = $hash->{NAME};
-  my $devName = $dev->{NAME}; # Device that created the events
-  my $hashRead = $hash->{CHANGED};
-  my $hashRead2 = $hash->{CHANGED};
-  
-  return "" if(IsDisabled($name)); # Return without any further action if the module is disabled
-  return "" if($hash->{TYPE} eq $dev->{TYPE}); # avoid endless
-  
-  #Log3 $name, 5, "RolladenAutomatik ($name): Notify ausgelöst durch Device '$dev' mit Änderungen: " . join(", ", @{$hash->{CHANGED}});
-  
+  my $name    = $hash->{NAME};
+  my $devName = $dev->{NAME}; # auslösendes Device
+
+  return "" if (IsDisabled($name));                  # Modul deaktiviert
+  return "" if ($hash->{TYPE} eq $dev->{TYPE});       # Endlosschleifen vermeiden
+
   # Attribute laden
   my $get = sub { my ($attr, $def) = @_; AttrVal($name, $attr, $def) };
 
@@ -66,24 +62,28 @@ sub RolladenAutomatik_Notify {
   my $maxFahrten     = $get->("MaxFahrtenProTag", 10);
   my $nachtsFahren   = $get->("NachtsFahren", 1);
 
-	# Vorzeitiger Abbruch, wenn das Event nicht relevant ist
-	my $matches = 0;
+  # --- Matches-Prüfung neu ---
+  my $events  = $dev->{CHANGED} // [];
+  my $changes = ref($events) eq 'ARRAY' ? join(", ", @$events) : "<keine CHANGED-Werte>";
+  Log3 $name, 4, "RolladenAutomatik [$name]: Notify von '$devName' mit Änderungen: $changes";
 
-	# Vergleiche Event gegen bekannte Geräte & relevante Readings
-	$matches = 1 if (
-		($devName eq $zustSonneDev && grep { $_ eq $zustSonneRead } @{$hash->{CHANGED}}) ||
-		($devName eq $sonnenDev && grep { $_ eq $aziRead || $_ eq $elvRead } @{$hash->{CHANGED}}) ||
-		($devName eq $tempAussDev && grep { $_ eq $tempAussRead } @{$hash->{CHANGED}}) ||
-		($devName eq $tempVorhDev && grep { $_ eq $tempVorhRead } @{$hash->{CHANGED}})
-	);
-	
-	my $test = 1 if $devName eq $sonnenDev;
-	
-my $changes = ref($hash->{CHANGED}) eq 'ARRAY' ? join(", ", @{$hash->{CHANGED}}) : "<keine CHANGED-Werte>";
-Log3 $name, 4, "RolladenAutomatik [$name]: Notify ausgelöst durch Device '$devName' mit Änderungen: $changes";
+  return undef if (ref($events) ne 'ARRAY' || !@$events);
 
-	Log3 $name, 4, "RolladenAutomatik: [$name] notified from device $devName $hashRead $hashRead2 Maches: $matches, Test: $test";
-#	return undef unless $matches;
+  my $hasReading = sub {
+    my ($reading) = @_;
+    my $q = quotemeta($reading);
+    return scalar grep { $_ =~ /^$q(?:[:\s]|$)/ } @$events;
+  };
+
+  my $matches = 0;
+  $matches ||= ($devName eq $zustSonneDev && $hasReading->($zustSonneRead));
+  $matches ||= ($devName eq $sonnenDev    && ($hasReading->($aziRead) || $hasReading->($elvRead)));
+  $matches ||= ($devName eq $tempAussDev  && $hasReading->($tempAussRead));
+  $matches ||= ($devName eq $tempVorhDev  && $hasReading->($tempVorhRead));
+
+  Log3 $name, 4, "RolladenAutomatik [$name]: Matches=$matches";
+  return undef unless $matches;
+  # --- Ende Matches-Prüfung ---
 
   # Werte holen
   my $zustand        = ReadingsVal($name, "Zustand", 0);
@@ -120,40 +120,38 @@ Log3 $name, 4, "RolladenAutomatik [$name]: Notify ausgelöst durch Device '$devN
       readingsBulkUpdate($hash, "Zustand", 1);
     }
     elsif ($sonnenZust == 2
-           && ((($azi >= $aziStart && $azi < $aziEnd) && ($elv >= $elvStart && $elv < $elvEnd))
-           || ($elv >= $einbauWinkel))
-           && $tempAussen >= $tempAussMin
-           && $tempVorh >= $tempVorhMin) {
+      && ((($azi >= $aziStart && $azi < $aziEnd) && ($elv >= $elvStart && $elv < $elvEnd))
+          || ($elv >= $einbauWinkel))
+      && $tempAussen >= $tempAussMin
+      && $tempVorh >= $tempVorhMin) {
       if ($actRollPos > $posBeschattung) {
         fhem("set $rolloDev pct $posBeschattung");
       }
       readingsBulkUpdate($hash, "Zustand", 3);
-	  readingsBulkUpdate($hash, "state", "Beschattung");
+      readingsBulkUpdate($hash, "state", "Beschattung");
       $fahrtenZaehler++;
       readingsBulkUpdate($hash, "FahrtenZaehler", $fahrtenZaehler);
     }
   }
   elsif ($zustand == 3) {
-    if (
-      (($sonnenZust == 1 && $fahrtenZaehler < $maxFahrten)
-      || ($azi < $aziStart || $azi > $aziEnd || $elv < $elvStart || $elv > $elvEnd)
-         && $elv < $einbauWinkel)
-    ) {
+    if ((($sonnenZust == 1 && $fahrtenZaehler < $maxFahrten)
+         || ($azi < $aziStart || $azi > $aziEnd || $elv < $elvStart || $elv > $elvEnd)
+            && $elv < $einbauWinkel)) {
       if ($actRollPos == $posBeschattung) {
         fhem("set $rolloDev pct $posOffen");
       }
       readingsBulkUpdate($hash, "Zustand", 2);
-	   readingsBulkUpdate($hash, "state", "Offen");
+      readingsBulkUpdate($hash, "state", "Offen");
     }
     elsif ($sonnenZust == 0) {
       fhem("set $rolloDev pct $posZu") if $nachtsFahren;
       readingsBulkUpdate($hash, "Zustand", 1);
-	  readingsBulkUpdate($hash, "state", "Nacht");
+      readingsBulkUpdate($hash, "state", "Nacht");
     }
   }
   else {
     readingsBulkUpdate($hash, "Zustand", 1);
-	readingsBulkUpdate($hash, "state", "Nacht");
+    readingsBulkUpdate($hash, "state", "Nacht");
   }
 
   readingsEndUpdate($hash, 1);
