@@ -21,7 +21,7 @@ System.Sonnenschein:Zustand:.*|System.Sonnenstand:azimuth:.*|System.Sonnenstand:
 	my $vPosBeschattung  = AttrVal($SELF, "PosBeschattung","5");
 	my $vPosOffen  = AttrVal($SELF, "PosOffen","100");  
 	my $vPosZu  = AttrVal($SELF, "PosZu","0");
-	my $ActPosRoll = ReadingsVal($vRollladenDev, "pct" , "0")
+	my $ActPosRoll = ReadingsVal($vRollladenDev, "pct" , "0");
 	
 	# Aussen Temperatur Attribute lesen 
 	my $vTempAussenDev   = AttrVal($SELF, "TempAussenDev","OG.Balkon.Wetterstation");
@@ -53,6 +53,7 @@ System.Sonnenschein:Zustand:.*|System.Sonnenstand:azimuth:.*|System.Sonnenstand:
 	fhem("setreading $SELF Temperatur_Vorhersage $vTempVorher");
 	fhem("setreading $SELF Temperatur_Vorhersage_Min $vTempVorherMin");
 	fhem("setreading $SELF Temperatur_Aussen_Min $vTempAussenMin");
+	fhem("setreading $SELF Aktuelle_Position_Rollo $ActPosRoll");
 
 	if ($vZustand == 1) # Nacht Modus
 	{ 	
