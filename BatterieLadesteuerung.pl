@@ -1,256 +1,335 @@
 *00:04:00 {
 
-	fhem ("deletereading $SELF .*");
-	
-	# Lese eigene Attribute
-	# Lese Vorhersage-Attribute
-	my $ForecastDev	= AttrVal($SELF, "ForecastDev","UG.PVAnlage.SolarForecast");
-	my $ForecastProdRead = AttrVal($SELF, "ForecastProdRead","RestOfDayPVforecast");
-	my $ForecastCosumRead = AttrVal($SELF, "ForecastCosumRead","RestOfDayConsumptionForecast");
+    ###############################################################
+    # Grund-Setup & Attribute
+    ###############################################################
 
-	# Lese Batterie-Attribute
-	my $PVBatterieDev  = AttrVal($SELF, "PVBatterieDev","UG.Keller.PVAnlage.Gen24");
-	my $PVBatReseRead = AttrVal($SELF, "PVBatReseRead","BatConfigReserve");
-	my $PVBatSOCRead = AttrVal($SELF, "PVBatSOCRead","BatteryChargePercent");
-	my $PVBatCapaRead = AttrVal($SELF, "PVBatCapaRead","BatteryCapacity");
-	my $PVBatConfigMaxEnabledRead = AttrVal($SELF, "PVBatConfigMaxEnabledRead","BatConfigMaxEnabled");
-	my $PVBatConfigMaxDischargeWattRead = AttrVal($SELF, "PVBatConfigMaxDischargeWattRead","BatConfigMaxDischargeWatt");
-	
-	# Lese sonst Attribute
-	my $EndHourCheapPower = AttrVal($SELF, "EndHourCheapPower","5");
-	my $PVBatReserveSOC = AttrVal($SELF, "PVBatReserveSOC","7");
-	my $PVBatMinSOCAtEndCheap = AttrVal($SELF, "PVBatMinSOCAtEndCheap","20");
-	my $PVMaxPower = AttrVal($SELF, "PVMaxPower","9000");
-	
-	# Lese Werte
-	my $ForecastProd = ReadingsVal($ForecastDev,$ForecastProdRead, "0");
-	my $ForecastCosum = ReadingsVal($ForecastDev,$ForecastCosumRead, "0");
-	
-	my $PVBatSOC = ReadingsVal($PVBatterieDev,$PVBatSOCRead, "10");
-	my $PVBatRese = ReadingsVal($PVBatterieDev,$PVBatReseRead, "10");
-	my $PVBatCapa = ReadingsVal($PVBatterieDev,$PVBatCapaRead, "10");
-	   
-	my $ForecastCosum1 = 0; 
-	my $ForecastProdCalc = 0;
-	
-	# Lese die Zeit für Sonnenaufgang und Sonnenuntergang
-	my $sunrise = ReadingsVal($ForecastDev, "Today_SunRise", "06:00");
-	my $sunset = ReadingsVal($ForecastDev, "Today_SunSet", "18:00");
+    fhem("deletereading $SELF .*");
 
-	# Konvertiere die Zeiten in Stunden
-	my ($sunrise_hour) = $sunrise =~ /^(\d+):/;
-	my ($sunset_hour) = $sunset =~ /^(\d+):/;
+    # Vorhersage-Device & Readings
+    my $ForecastDev              = AttrVal($SELF, "ForecastDev",              "UG.PVAnlage.SolarForecast");
+    my $ForecastProdRead         = AttrVal($SELF, "ForecastProdRead",         "RestOfDayPVforecast");
+    my $ForecastCosumRead        = AttrVal($SELF, "ForecastCosumRead",        "RestOfDayConsumptionForecast");
 
-	my $FoCaCosumDurCheapPower = 0; # Vorhersage Stromverbrauch während der Günstig Strom phase
-	
-	# Lese stündliche Vorhersagewerte für Verbrauch in das Array
-	# Initialisiere das Array @hourlyForecastConsumption mit 24 Nullen
-	my @hourlyForecastConsumption = (0) x 24;
-	for (my $i = 1; $i <= 24; $i++) {
-		my $readingName = "special_todayConsumptionForecast_" . sprintf("%02d", $i);
-		my $value = ReadingsVal($ForecastDev, $readingName, "0");
-		
-		# Extrahiere den numerischen Teil
-		if ($value =~ /(\d+)/) {
-			$value = $1;
-		} else {
-			$value = 0;	 # Fallback, falls kein numerischer Wert gefunden wird
-		}
+    # Batterie-Device & Readings
+    my $PVBatterieDev                    = AttrVal($SELF, "PVBatterieDev",                    "UG.Keller.PVAnlage.Gen24");
+    my $PVBatReseRead                    = AttrVal($SELF, "PVBatReseRead",                    "BatConfigReserve");
+    my $PVBatSOCRead                     = AttrVal($SELF, "PVBatSOCRead",                     "BatteryChargePercent");
+    my $PVBatCapaRead                    = AttrVal($SELF, "PVBatCapaRead",                    "BatteryCapacity");
+    my $PVBatConfigMaxEnabledRead        = AttrVal($SELF, "PVBatConfigMaxEnabledRead",        "BatConfigMaxEnabled");
+    my $PVBatConfigMaxDischargeWattRead  = AttrVal($SELF, "PVBatConfigMaxDischargeWattRead",  "BatConfigMaxDischargeWatt");
 
-		$hourlyForecastConsumption[$i-1] = $value;	# Setze den Wert im Array
-		$ForecastCosum1 = $ForecastCosum1 + $value;
-		if ($i >= 1 && $i <= ($EndHourCheapPower) ){
-			$FoCaCosumDurCheapPower = $FoCaCosumDurCheapPower + $value;
-		}
-	}
-	
-	# Initialisiere das Array @hourlyForecastProduction mit 24 Nullen (oder entsprechend der Anzahl der Stunden von Sonnenaufgang bis Sonnenuntergang)
-	my @hourlyForecastProduction = (0) x 24;
-	# Lese stündliche Vorhersagewerte für PV-Produktion in das Array
-	for (my $i = 1; $i <= 24; $i++) {
-		if ($i>=$sunrise_hour && $i<= $sunset_hour){
-			my $readingName = "Today_Hour" . sprintf("%02d", $i) . "_PVforecast";
-			my $value = ReadingsVal($ForecastDev, $readingName, "0");
-			
-			# Extrahiere den numerischen Teil
-			if ($value =~ /(\d+)/) {
-				$value = $1;
-			} else {
-				$value = 0;	 # Fallback, falls kein numerischer Wert gefunden wird
-			}
-			# Wenn mehr als die maximale Lestung der PV Analge pro Stunde vorhergesagt wird stimmt das nicht.
-			# Die Anlage kann nicht mehr Energie pro Stunde liefern als ihre maximale Leistung (E = P*t).
-			if ( $value < $PVMaxPower){
-				$hourlyForecastProduction[$i-1] = $value;  # Setze den Wert im Array
-				$ForecastProdCalc = $ForecastProdCalc + $value;
-			}
-			else{
-				$hourlyForecastProduction[$i-1] = $PVMaxPower;  # Setze den Wert im Array
-				$ForecastProdCalc = $ForecastProdCalc + $PVMaxPower;
-			}
-		}else{
-			$hourlyForecastProduction[$i-1] = 0;  # Setze den Wert im Array auf 0
-		}
-	}
+    # Sonstige Attribute
+    my $EndHourCheapPower        = AttrVal($SELF, "EndHourCheapPower",        "5");   # Ende der günstigen Stromphase (Stunde)
+    my $PVBatReserveSOC          = AttrVal($SELF, "PVBatReserveSOC",          "7");   # Reserve-SOC in %
+    my $PVBatMinSOCAtEndCheap    = AttrVal($SELF, "PVBatMinSOCAtEndCheap",    "20");  # Minimaler SOC am Ende der Billigphase
+    my $PVMaxPower               = AttrVal($SELF, "PVMaxPower",               "9000");
+    my $TargetSOC                = AttrVal($SELF, "TargetSOC",                "80");  # Ziel-SOC in %
 
-	# Berechne die verbleibenden Stunden von Sonnenaufgang an bis die Produktion den Verbrauch übersteigt.
-	my $remainingTime = 0;
-	
-	fhem ("setreading $SELF sunrise_hour $sunrise_hour");	
-	fhem ("setreading $SELF sunset_hour $sunset_hour"); 
-	for (my $i = $sunrise_hour; $i <= $sunset_hour; $i++) {
-		my $Num = sprintf("%02d", $i);
-		if ($hourlyForecastProduction[$i-1] > $hourlyForecastConsumption[$i-1]) {
-			$remainingTime = $i - $sunrise_hour;
-			last;
-		}
-	}
-	fhem ("setreading $SELF RemainingTime $remainingTime");
-	# Ist der Sonnenaufgang nach 5 Uhr addiere die Stunden zwischen 5 Uhr und Sonnenaufgang dazu
-	if ($sunrise_hour > $EndHourCheapPower){
-		$remainingTime += ($sunrise_hour - $EndHourCheapPower);
-	}elsif($sunrise_hour < $EndHourCheapPower){
-		$remainingTime -= ($EndHourCheapPower - $sunrise_hour);
-	}
-	$remainingTime += 1; # Um 1h korrigieren (Sicherheit)
-	
-	# Berechne nutzbare verbleibende Energie der Batterie
-	my $BattUseRemaEner = ($PVBatSOC - $PVBatReserveSOC) / 100 * $PVBatCapa;
-	
-	# Berechne erforderliche Energie + 20% Reserve
-	my $RequEnergieToday = ($ForecastCosum1 - $FoCaCosumDurCheapPower) * 1.2 ;
-	#Berechne wieviel Energie geladen werden muss
-	my $RequEnergieToCharge = ($RequEnergieToday - $ForecastProdCalc) - $BattUseRemaEner;
+    ###############################################################
+    # Aktuelle Werte lesen
+    ###############################################################
 
-	my $EnergieToCharge = 0;
-	
-	# Readings ausgeben
-	fhem ("setreading $SELF ForecastProd $ForecastProd");
-	fhem ("setreading $SELF ForecastProdCalc $ForecastProdCalc"); 
-	fhem ("setreading $SELF RemainingTime $remainingTime");		
-	fhem ("setreading $SELF ForecastCosum $ForecastCosum");
-	fhem ("setreading $SELF ForecastCosumCalc $ForecastCosum1");
-	fhem ("setreading $SELF FoCaCosumDurCheapPower $FoCaCosumDurCheapPower");
-	fhem ("setreading $SELF PVBatSOC $PVBatSOC");
-	fhem ("setreading $SELF PVBatRese $PVBatRese");
-	fhem ("setreading $SELF PVBatCapa $PVBatCapa");
-	fhem ("setreading $SELF BattUseRemaEner $BattUseRemaEner");
-	fhem ("setreading $SELF RequEnergieToday $RequEnergieToday");
-	fhem ("setreading $SELF RequEnergieToCharge $RequEnergieToCharge");
+    my $ForecastProd   = ReadingsVal($ForecastDev, $ForecastProdRead,  "0");
+    my $ForecastCosum  = ReadingsVal($ForecastDev, $ForecastCosumRead, "0");
 
-	my $PVBatNewResvSOC = $PVBatReserveSOC;
+    my $PVBatSOC       = ReadingsVal($PVBatterieDev, $PVBatSOCRead,    "10");
+    my $PVBatRese      = ReadingsVal($PVBatterieDev, $PVBatReseRead,   "10");
+    my $PVBatCapa      = ReadingsVal($PVBatterieDev, $PVBatCapaRead,   "10");
 
-	# Reicht die Energie für den Tag?
-	if ($RequEnergieToCharge > 0)
-	{
-	#############################################################################################
-	# Die Vorhersage sagt voraus, dass die Energie nicht ausreicht
-	#############################################################################################
+    ###############################################################
+    # Sonnenaufgang / Sonnenuntergang
+    ###############################################################
 
-		# Wenn die zu ladende Energie mehr ist als die Batterie aufnehmen kann, den Wert auf das Maximum begrenzen
-		if ($RequEnergieToCharge > ($PVBatCapa - $BattUseRemaEner) ){
-			
-			$EnergieToCharge = ($PVBatCapa - $BattUseRemaEner);
-		}
-		else
-		{
-			$EnergieToCharge = $RequEnergieToCharge;
-		}
-	}
-	else{
-	#############################################################################################
-	# Die Vorhersage sagt mehr Energie voraus bzw. mit der rest Akku Energie ist mehr Energie verfügbar als während des Tages benötigt wird
-	#############################################################################################
-		
-		# Berechne die benötigte Energie bis zur ausreichenden PV-Leistung
-		my $requiredEnergyUntilSufficient = 0;
+    my $sunrise = ReadingsVal($ForecastDev, "Today_SunRise", "06:00");
+    my $sunset  = ReadingsVal($ForecastDev, "Today_SunSet",  "18:00");
 
-		for (my $i = $EndHourCheapPower; $i < ($EndHourCheapPower + $remainingTime); $i++) {
-			if ($i < ($EndHourCheapPower + $remainingTime - 1)){
-				$requiredEnergyUntilSufficient += ($hourlyForecastConsumption[$i - 1] - $hourlyForecastProduction[$i - 1]);
-			}
-			else{
-				# Für die letzte Stunden wird die Produktion nicht abgezogen
-				$requiredEnergyUntilSufficient += ($hourlyForecastConsumption[$i - 1]);
-			}
-			my $Num = sprintf("%02d", $i);
-			fhem ("setreading $SELF hourlyForecastProduction$Num $hourlyForecastProduction[$i-1]"); 
-			fhem ("setreading $SELF hourlyForecastConsumption$Num $hourlyForecastConsumption[$i-1]");
-			
-		}
+    my ($sunrise_hour) = $sunrise =~ /^(\d+):/;
+    my ($sunset_hour)  = $sunset  =~ /^(\d+):/;
 
-		# Berechne die Differenz zwischen der verfügbaren Batteriekapazität und der benötigten Energie
-		my $energyDeficit = $requiredEnergyUntilSufficient - $BattUseRemaEner;
-		
-		# Setze Reading für die Energiedefizit
-		fhem ("setreading $SELF EnergyDeficit $energyDeficit");
-			
-		# Lade die Batterie, falls sie nicht genug Energie liefert
-		if ($energyDeficit > 0) {
-			$EnergieToCharge = $energyDeficit;
-		} 
-		else{
-			# Die Batterie hat noch genügend Energie von 5 bis die PV-Leistung ausreicht. Aber reicht die Energie auch bis dahin?
-			my $requiredEnergyUntilSufficient2 = 0;
+    fhem("setreading $SELF sunrise_hour $sunrise_hour");
+    fhem("setreading $SELF sunset_hour $sunset_hour");
 
-			for (my $i = 1; $i < $EndHourCheapPower + $remainingTime; $i++) {
-				if ($i < ($EndHourCheapPower + $remainingTime - 1)){
-					$requiredEnergyUntilSufficient2 += ($hourlyForecastConsumption[$i - 1] - $hourlyForecastProduction[$i - 1]);
-				}
-				else{
-					# Für die letzte Stunden wird die Produktion nicht abgezogen
-					$requiredEnergyUntilSufficient2 += ($hourlyForecastConsumption[$i - 1]);
-				}
-				my $Num = sprintf("%02d", $i);
-				fhem ("setreading $SELF hourlyForecastProduction$Num $hourlyForecastProduction[$i-1]"); 
-				fhem ("setreading $SELF hourlyForecastConsumption$Num $hourlyForecastConsumption[$i-1]");
-			
-			}
-			# Setze Reading für die benötigte Energie von jetzt bis zur ausreichenden PV-Leistung
-			fhem ("setreading $SELF RequiredEnergyUntilSufficient2 $requiredEnergyUntilSufficient2");
-		 
-			# Berechne die Differenz zwischen der verfügbaren Batteriekapazität und der benötigten Energie
-			my $energyDeficit2 = $requiredEnergyUntilSufficient2 - $BattUseRemaEner;
-			
-			# Setze Reading für die Energiedefizit
-			fhem ("setreading $SELF EnergyDeficit2 $energyDeficit2");
+    ###############################################################
+    # Stündliche Vorhersage: Verbrauch
+    ###############################################################
 
-			# Gibt es ein Energiedefizit, das Entladen der Batterie stoppen
-			if ($energyDeficit2 > 0) {
-				# Errechne wieviel Energie noch verbraucht werden kann
-				my $UseableBattEnergie = $BattUseRemaEner - $requiredEnergyUntilSufficient;
-				fhem ("setreading $SELF UseableBattEnergie $UseableBattEnergie");
-				#Errechne neue Batterie Entladestand
-				$PVBatNewResvSOC =  (100/$PVBatCapa*$UseableBattEnergie) + $PVBatReserveSOC;	
-			} 
+    my @hourlyForecastConsumption = (0) x 24;
+    my $ForecastCosumCalc         = 0;
+    my $FoCaCosumDurCheapPower    = 0;
+
+    for (my $i = 1; $i <= 24; $i++) {
+        my $readingName = "special_todayConsumptionForecast_" . sprintf("%02d", $i);
+        my $value       = ReadingsVal($ForecastDev, $readingName, "0");
+
+        if ($value =~ /(\d+)/) {
+            $value = $1;
+        } else {
+            $value = 0;
+        }
+
+        $hourlyForecastConsumption[$i-1] = $value;
+        $ForecastCosumCalc += $value;
+
+        if ($i >= 1 && $i <= $EndHourCheapPower) {
+            $FoCaCosumDurCheapPower += $value;
+        }
+    }
+
+    ###############################################################
+    # Stündliche Vorhersage: PV-Produktion
+    ###############################################################
+
+    my @hourlyForecastProduction = (0) x 24;
+    my $ForecastProdCalc         = 0;
+
+    for (my $i = 1; $i <= 24; $i++) {
+        if ($i >= $sunrise_hour && $i <= $sunset_hour) {
+            my $readingName = "Today_Hour" . sprintf("%02d", $i) . "_PVforecast";
+            my $value       = ReadingsVal($ForecastDev, $readingName, "0");
+
+            if ($value =~ /(\d+)/) {
+                $value = $1;
+            } else {
+                $value = 0;
+            }
+
+            if ($value < $PVMaxPower) {
+                $hourlyForecastProduction[$i-1] = $value;
+                $ForecastProdCalc += $value;
+            } else {
+                $hourlyForecastProduction[$i-1] = $PVMaxPower;
+                $ForecastProdCalc += $PVMaxPower;
+            }
+        } else {
+            $hourlyForecastProduction[$i-1] = 0;
+        }
+    }
+
+    ###############################################################
+    # Zeit bis ausreichender PV-Leistung (RemainingTime)
+    ###############################################################
+
+    my $remainingTime = 0;
+
+    for (my $i = $sunrise_hour; $i <= $sunset_hour; $i++) {
+        if ($hourlyForecastProduction[$i-1] > $hourlyForecastConsumption[$i-1]) {
+            $remainingTime = $i - $sunrise_hour;
+            last;
+        }
+    }
+
+    fhem("setreading $SELF RemainingTime_raw $remainingTime");
+
+    if ($sunrise_hour > $EndHourCheapPower) {
+        $remainingTime += ($sunrise_hour - $EndHourCheapPower);
+    } elsif ($sunrise_hour < $EndHourCheapPower) {
+        $remainingTime -= ($EndHourCheapPower - $sunrise_hour);
+    }
+    $remainingTime += 1; # Sicherheitsstunde
+
+    fhem("setreading $SELF RemainingTime $remainingTime");
+
+    ###############################################################
+    # Batterie-Energie / Restenergie
+    ###############################################################
+
+    my $BattUseRemaEner = ($PVBatSOC - $PVBatReserveSOC) / 100 * $PVBatCapa;
+
+    my $RequEnergieToday    = ($ForecastCosumCalc - $FoCaCosumDurCheapPower) * 1.1;
+    my $RequEnergieToCharge = ($RequEnergieToday - $ForecastProdCalc) - $BattUseRemaEner;
+
+    ###############################################################
+    # Alte Logik: EnergieToCharge & Reserve-SOC
+    ###############################################################
+
+    my $EnergieToCharge = 0;
+    my $PVBatNewResvSOC = $PVBatReserveSOC;
+
+    if ($RequEnergieToCharge > 0) {
+
+        # Vorhersage sagt: Energie reicht nicht
+        if ($RequEnergieToCharge > ($PVBatCapa - $BattUseRemaEner)) {
+            $EnergieToCharge += ($PVBatCapa - $BattUseRemaEner);
+        } else {
+            $EnergieToCharge += $RequEnergieToCharge;
+        }
+
+    } else {
+
+        # Vorhersage sagt: genug oder zu viel Energie
+        my $requiredEnergyUntilSufficient = 0;
+
+        for (my $i = $EndHourCheapPower; $i < ($EndHourCheapPower + $remainingTime); $i++) {
+            if ($i < ($EndHourCheapPower + $remainingTime - 1)) {
+                $requiredEnergyUntilSufficient += ($hourlyForecastConsumption[$i-1] - $hourlyForecastProduction[$i-1]);
+            } else {
+                $requiredEnergyUntilSufficient += $hourlyForecastConsumption[$i-1];
+            }
+            my $Num = sprintf("%02d", $i);
+            fhem("setreading $SELF hourlyForecastProduction$Num $hourlyForecastProduction[$i-1]");
+            fhem("setreading $SELF hourlyForecastConsumption$Num $hourlyForecastConsumption[$i-1]");
+        }
+
+        my $energyDeficit = $requiredEnergyUntilSufficient - $BattUseRemaEner;
+        fhem("setreading $SELF EnergyDeficit $energyDeficit");
+
+        if ($energyDeficit > 0) {
+            $EnergieToCharge += $energyDeficit;
+        } else {
+
+            my $requiredEnergyUntilSufficient2 = 0;
+
+            for (my $i = 1; $i < $EndHourCheapPower + $remainingTime; $i++) {
+                if ($i < ($EndHourCheapPower + $remainingTime - 1)) {
+                    $requiredEnergyUntilSufficient2 += ($hourlyForecastConsumption[$i-1] - $hourlyForecastProduction[$i-1]);
+                } else {
+                    $requiredEnergyUntilSufficient2 += $hourlyForecastConsumption[$i-1];
+                }
+                my $Num = sprintf("%02d", $i);
+                fhem("setreading $SELF hourlyForecastProduction$Num $hourlyForecastProduction[$i-1]");
+                fhem("setreading $SELF hourlyForecastConsumption$Num $hourlyForecastConsumption[$i-1]");
+            }
+
+            fhem("setreading $SELF RequiredEnergyUntilSufficient2 $requiredEnergyUntilSufficient2");
+
+            my $energyDeficit2 = $requiredEnergyUntilSufficient2 - $BattUseRemaEner;
+            fhem("setreading $SELF EnergyDeficit2 $energyDeficit2");
+
+            if ($energyDeficit2 > 0) {
+                my $UseableBattEnergie = $BattUseRemaEner - $requiredEnergyUntilSufficient;
+                fhem("setreading $SELF UseableBattEnergie $UseableBattEnergie");
+
+                $PVBatNewResvSOC = (100 / $PVBatCapa * $UseableBattEnergie) + $PVBatReserveSOC;
+            }
+        }
+    }
+
+    ###############################################################
+    # Nachbearbeitung SOC-Reserve & erste Laderaten
+    ###############################################################
+
+    $PVBatNewResvSOC = round($PVBatNewResvSOC, 0);
+
+    if ($PVBatNewResvSOC < $PVBatMinSOCAtEndCheap) {
+        $PVBatNewResvSOC = $PVBatMinSOCAtEndCheap;
+    }
+	# Wenn der neue Reserve SOC mehr Energie erfordert als nach geladen werden sollte dann die nachzuladende Energiemenge anpassen
+	if (($PVBatNewResvSOC - $PVBatSOC) > 0){
+		my $BattCapGap = ($PVBatNewResvSOC - $PVBatSOC) / 100 * $PVBatCapa;
+		fhem("setreading $SELF BattCapGap $BattCapGap"); 
+		if ($BattCapGap>$EnergieToCharge){
+			$EnergieToCharge = $BattCapGap;
 		}
 	}
-
-	$PVBatNewResvSOC = round($PVBatNewResvSOC, 0);	
-	# Wenn der neue reserve Batterieladestand unter dem der Mindest Reserve liegt den neuen Reverveladestand auf das Minimum setzten
-	if ($PVBatNewResvSOC < $PVBatMinSOCAtEndCheap) {
-		$PVBatNewResvSOC = $PVBatMinSOCAtEndCheap;
-	}
-
-	# Berechne die Laderate für die Batterie. Verwende eine fixe Dauer von 4,25 Stunden
-	my $BattChargRate = $EnergieToCharge / 4.25;
-	my $BattDisChargRate = $BattChargRate * (-1);
-
-	fhem ("setreading $SELF EnergieToCharge $EnergieToCharge");
-	fhem ("setreading $SELF BattChargRate $BattChargRate");
-	fhem ("setreading $SELF BattDisChargRate $BattDisChargRate");
-	fhem ("setreading $SELF PVBatNewResvSOC $PVBatNewResvSOC");
 	
-	# Setze die neue Batteriereserve falls notwendig
-	if ($PVBatRese != $PVBatNewResvSOC){
-		fhem ("set $PVBatterieDev $PVBatReseRead $PVBatNewResvSOC"); 
-	}
+	my $hours_to_charge = $EndHourCheapPower;
+    if ($hours_to_charge < 1) { $hours_to_charge = 1; }
 
-	# Wenn die Laderate größer als 0 ist, starte das Laden der Batterie
-	if ($BattChargRate > 0)
-	{
-		fhem ("set $PVBatterieDev $PVBatConfigMaxEnabledRead dischrMax"); 
-		fhem ("set $PVBatterieDev $PVBatConfigMaxDischargeWattRead $BattDisChargRate"); 
-	}
+    # Basis-Laderate (5 Stunden als Basis)
+    my $BattChargRate    = $EnergieToCharge / $hours_to_charge;
+    my $BattDisChargRate = $BattChargRate * (-1);
 	
+    fhem("setreading $SELF BattDisChargRate_1 $BattDisChargRate");   
+	fhem("setreading $SELF BattChargRate_1 $BattChargRate");
+	
+    ###############################################################
+    # SOC-Simulation NACH alter Logik (inkl. Nachtladung)
+    ###############################################################
+
+    my $StartSOCpercent = $PVBatSOC;
+    my $StartSOCwh      = ($StartSOCpercent / 100) * $PVBatCapa;
+
+    my @hourlySOC          = (0) x 24;
+    my $soc_wh             = $StartSOCwh;
+    my $soc_reaches_target = 0;
+
+    for (my $h = 1; $h <= 24; $h++) {
+
+        # 1) Nachtladung berücksichtigen (00:00–EndHourCheapPower)
+        if ($h <= $EndHourCheapPower && $BattChargRate > 0) {
+            $soc_wh += $BattChargRate;
+        }
+		else {
+			# 2) PV-Produktion + Verbrauch (nur wenn nicht geladen wird)
+			my $delta = $hourlyForecastProduction[$h-1] - $hourlyForecastConsumption[$h-1];
+			$soc_wh += $delta;
+		}
+        # 3) Begrenzen auf Batteriegröße und Reserve
+        my $min_wh = ($PVBatReserveSOC / 100) * $PVBatCapa;
+        if ($soc_wh > $PVBatCapa) { $soc_wh = $PVBatCapa; }
+        if ($soc_wh < $min_wh)    { $soc_wh = $min_wh;    }
+
+        # 4) SOC in %
+        my $soc_percent = ($soc_wh / $PVBatCapa) * 100;
+        $hourlySOC[$h-1] = sprintf("%.1f", $soc_percent);
+
+        # 5) Readings
+        my $Num = sprintf("%02d", $h);
+        fhem("setreading $SELF hourlySOC_$Num $hourlySOC[$h-1]");
+
+        # 6) Ziel-SOC erreicht?
+        if ($soc_percent >= $TargetSOC) {
+            $soc_reaches_target = 1;
+        }
+    }
+
+    fhem("setreading $SELF SOC_Reaches_Target $soc_reaches_target");
+
+    ###############################################################
+    # Offset berechnen, falls Ziel-SOC nicht erreicht wird
+    ###############################################################
+
+    if (!$soc_reaches_target) {
+
+        my $target_wh  = ($TargetSOC / 100) * $PVBatCapa;
+        my $missing_wh = $target_wh - $soc_wh;
+        if ($missing_wh < 0) { $missing_wh = 0; }
+
+        fhem("setreading $SELF MissingEnergyAfterSimulation $missing_wh");
+
+        my $offset_rate = $missing_wh / $hours_to_charge;
+
+        fhem("setreading $SELF OffsetChargeRate $offset_rate");
+
+        $BattChargRate    += $offset_rate;
+        $BattDisChargRate  = $BattChargRate * (-1);
+
+        fhem("setreading $SELF BattChargRate_Final $BattChargRate");
+        fhem("setreading $SELF BattDisChargRate_Final $BattDisChargRate");
+    }
+
+    ###############################################################
+    # Readings schreiben (Übersicht)
+    ###############################################################
+
+    fhem("setreading $SELF ForecastProd $ForecastProd");
+    fhem("setreading $SELF ForecastProdCalc $ForecastProdCalc");
+    fhem("setreading $SELF ForecastCosum $ForecastCosum");
+    fhem("setreading $SELF ForecastCosumCalc $ForecastCosumCalc");
+    fhem("setreading $SELF FoCaCosumDurCheapPower $FoCaCosumDurCheapPower");
+    fhem("setreading $SELF PVBatSOC $PVBatSOC");
+    fhem("setreading $SELF PVBatRese $PVBatRese");
+    fhem("setreading $SELF PVBatCapa $PVBatCapa");
+    fhem("setreading $SELF BattUseRemaEner $BattUseRemaEner");
+    fhem("setreading $SELF RequEnergieToday $RequEnergieToday");
+    fhem("setreading $SELF RequEnergieToCharge $RequEnergieToCharge");
+    fhem("setreading $SELF EnergieToCharge $EnergieToCharge");
+ 
+
+    fhem("setreading $SELF PVBatNewResvSOC $PVBatNewResvSOC");
+
+    ###############################################################
+    # Batterie-Parameter setzen
+    ###############################################################
+
+    if ($PVBatRese != $PVBatNewResvSOC) {
+        fhem("set $PVBatterieDev $PVBatReseRead $PVBatNewResvSOC");
+    }
+
+    if ($BattChargRate > 0) {
+        fhem("set $PVBatterieDev $PVBatConfigMaxEnabledRead dischrMax");
+        fhem("set $PVBatterieDev $PVBatConfigMaxDischargeWattRead $BattDisChargRate");
+    }
+
 }
