@@ -243,7 +243,7 @@
     my @hourlySOC          = (0) x 24;
     my $soc_wh             = $StartSOCwh;
     my $soc_reaches_target = 0;
-
+	my $soc_wh_max 	       = 0;
     for (my $h = 1; $h <= 24; $h++) {
 
         # 1) Nachtladung berücksichtigen (00:00–EndHourCheapPower)
@@ -272,9 +272,13 @@
         if ($soc_percent >= $TargetSOC) {
             $soc_reaches_target = 1;
         }
+		if ($soc_wh_max < $soc_wh){
+			$soc_wh_max = $soc_wh;
+		}
     }
 
     fhem("setreading $SELF SOC_Reaches_Target $soc_reaches_target");
+	fhem("setreading $SELF SOC_WH_Max $soc_wh_max");
 
     ###############################################################
     # Offset berechnen, falls Ziel-SOC nicht erreicht wird
@@ -283,7 +287,7 @@
     if (!$soc_reaches_target) {
 
         my $target_wh  = ($TargetSOC / 100) * $PVBatCapa;
-        my $missing_wh = $target_wh - $soc_wh;
+        my $missing_wh = $target_wh - $soc_wh_max;
         if ($missing_wh < 0) { $missing_wh = 0; }
 
         fhem("setreading $SELF MissingEnergyAfterSimulation $missing_wh");
