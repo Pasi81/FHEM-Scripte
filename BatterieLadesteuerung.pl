@@ -111,10 +111,12 @@
     ###############################################################
 
     my $remainingTime = 0;
+	my $hourMoreProdThenCon = 24;
 
     for (my $i = $sunrise_hour; $i <= $sunset_hour; $i++) {
         if ($hourlyForecastProduction[$i-1] > $hourlyForecastConsumption[$i-1]) {
             $remainingTime = $i - $sunrise_hour;
+			$hourMoreProdThenCon = $i;
             last;
         }
     }
@@ -272,13 +274,19 @@
         if ($soc_percent >= $TargetSOC) {
             $soc_reaches_target = 1;
         }
-		if ($soc_wh_max < $soc_wh){
-			$soc_wh_max = $soc_wh;
+		if ($h > $hourMoreProdThenCon){
+			if ($soc_wh_max < $soc_wh){
+				$soc_wh_max = $soc_wh;
+			}
 		}
     }
-
+	my $soc_max = (($soc_wh_max / $PVBatCapa) * 100);
+	$soc_max = sprintf("%.1f", $soc_max);
     fhem("setreading $SELF SOC_Reaches_Target $soc_reaches_target");
 	fhem("setreading $SELF SOC_WH_Max $soc_wh_max");
+	fhem("setreading $SELF SOC_Max $soc_max");
+	fhem("setreading $SELF HourMoreProductionThenConsume $hourMoreProdThenCon");
+	
 
     ###############################################################
     # Offset berechnen, falls Ziel-SOC nicht erreicht wird
