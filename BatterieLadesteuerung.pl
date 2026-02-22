@@ -1,4 +1,8 @@
 *00:04:00 {
+    ###############################################################
+    # Batterie-Ladesteuerung basierend auf PV-Produktion, Verbrauchsprognose und Ziel-SOC
+    # V1.0.0
+    ###############################################################
 
     ###############################################################
     # Grund-Setup & Attribute
@@ -270,17 +274,21 @@
         my $Num = sprintf("%02d", $h);
         fhem("setreading $SELF hourlySOC_$Num $hourlySOC[$h-1]");
 
-        # 6) Ziel-SOC erreicht?
-        if ($soc_percent >= $TargetSOC) {
-            $soc_reaches_target = 1;
-        }
+
 		if ($h > $hourMoreProdThenCon){
 			if ($soc_wh_max < $soc_wh){
 				$soc_wh_max = $soc_wh;
 			}
 		}
     }
-	my $soc_max = (($soc_wh_max / $PVBatCapa) * 100);
+    # Berechnen des maximal erreichbaren SOC basierend auf der Simulation
+    my $soc_max = (($soc_wh_max / $PVBatCapa) * 100);
+
+    #Ziel-SOC erreicht?
+    if ($soc_max >= $TargetSOC) {
+        $soc_reaches_target = 1;
+    }
+	
 	$soc_max = sprintf("%.1f", $soc_max);
     fhem("setreading $SELF SOC_Reaches_Target $soc_reaches_target");
 	fhem("setreading $SELF SOC_WH_Max $soc_wh_max");
