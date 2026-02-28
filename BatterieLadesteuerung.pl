@@ -1,7 +1,7 @@
 *00:04:00 {
     ###############################################################
     # Batterie-Ladesteuerung basierend auf PV-Produktion, Verbrauchsprognose und Ziel-SOC
-    # V1.0.0
+    # V1.1.1
     ###############################################################
 
     ###############################################################
@@ -247,9 +247,12 @@
     my $StartSOCwh      = ($StartSOCpercent / 100) * $PVBatCapa;
 
     my @hourlySOC          = (0) x 24;
+    my @hourlySOC_WH       = (0) x 24;
     my $soc_wh             = $StartSOCwh;
     my $soc_reaches_target = 0;
 	my $soc_wh_max 	       = 0;
+    my $min_wh = 0;
+
     for (my $h = 1; $h <= 24; $h++) {
 
         # 1) Nachtladung berücksichtigen (00:00–EndHourCheapPower)
@@ -262,17 +265,25 @@
 			$soc_wh += $delta;
 		}
         # 3) Begrenzen auf Batteriegröße und Reserve
-        my $min_wh = ($PVBatReserveSOC / 100) * $PVBatCapa;
         if ($soc_wh > $PVBatCapa) { $soc_wh = $PVBatCapa; }
-        if ($soc_wh < $min_wh)    { $soc_wh = $min_wh;    }
-
+        # Der Min SOC kann bis zum Ende der Billigphase auch höher liegen, dann gilt wieder der alte Reserve-SOC als Minimum.
+        if ($h <= $EndHourCheapPower){
+            $min_wh = ($PVBatNewResvSOC / 100) * $PVBatCapa;
+            if ($soc_wh < $min_wh)    { $soc_wh = $min_wh;    }
+        }else {
+            $min_wh = ($PVBatReserveSOC / 100) * $PVBatCapa;
+            if ($soc_wh < $min_wh)    { $soc_wh = $min_wh;    }
+        }
+        
         # 4) SOC in %
         my $soc_percent = ($soc_wh / $PVBatCapa) * 100;
         $hourlySOC[$h-1] = sprintf("%.1f", $soc_percent);
+        $hourlySOC_WH[$h-1] = sprintf("%.1f", $soc_wh);
 
         # 5) Readings
         my $Num = sprintf("%02d", $h);
         fhem("setreading $SELF hourlySOC_$Num $hourlySOC[$h-1]");
+        fhem("setreading $SELF hourlySOC_WH_$Num $hourlySOC_WH[$h-1]");
 
 
 		if ($h > $hourMoreProdThenCon){
@@ -304,11 +315,37 @@
 
         my $target_wh  = ($TargetSOC / 100) * $PVBatCapa;
         my $missing_wh = $target_wh - $soc_wh_max;
+        my $offset_rate = 0;
         if ($missing_wh < 0) { $missing_wh = 0; }
 
         fhem("setreading $SELF MissingEnergyAfterSimulation $missing_wh");
 
-        my $offset_rate = $missing_wh / $hours_to_charge;
+        # Berechnen des neuen SOC am Ende der Billigphase mit fehlender Energie
+        my $new_soc_wh = $hourlySOC_WH[$EndHourCheapPower-1] + $missing_wh;
+        fhem("setreading $SELF NewSOC_WH_EndCheap $new_soc_wh");
+        
+        if ($BattChargRate <= 0) {
+            if ($new_soc_wh < $BattUseRemaEner) {
+                # Wenn der neue SOC am Ende der Billigphase die nutzbare Restenergie unterschreitet, dann den ReserveSOC anpassen.
+                $PVBatNewResvSOC = ($new_soc_wh / $PVBatCapa) * 100;
+                # Auf eine Nachkommastelle runden.
+                $PVBatNewResvSOC = sprintf("%.1f", $PVBatNewResvSOC);
+                if ($PVBatNewResvSOC < $PVBatMinSOCAtEndCheap) {
+                    $PVBatNewResvSOC = $PVBatMinSOCAtEndCheap;
+                }
+            }else {
+                # Wenn der neue SOC am Ende der Billigphase über der nutzbaren Restenergie liegt, dann nur die fehlende Energie nachladen 
+                # Offset) und berücksichtigen das beim laden auch nichts mehr verbraucht wird.
+                my $NotUsedBatEnergy = $BattUseRemaEner - $hourlySOC_WH[$EndHourCheapPower-1];
+                fhem("setreading $SELF NotUsedBattteryEnergyBecauseOfCharging $NotUsedBatEnergy");
+                $offset_rate = ($missing_wh-$NotUsedBatEnergy) / $hours_to_charge;
+                if ($offset_rate < 0) { $offset_rate = 0; }
+            }
+        } else {
+            # Ansonsten den Offset über die gesamte Zeit bis zum Ende der Billigphase verteilen.
+            $offset_rate = $missing_wh / $hours_to_charge;
+            fhem("setreading $SELF OffsetChargeRate_Batter $offset_rate");
+        }
 
         fhem("setreading $SELF OffsetChargeRate $offset_rate");
 
